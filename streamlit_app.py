@@ -1,17 +1,18 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import numpy as np
 
 # -----------------------------
-# 페이지 설정
+# 페이지 기본 설정
 # -----------------------------
 st.set_page_config(page_title="서울 음식점 지도", layout="wide")
 
-st.title("🍜 서울 음식점 지도 시각화")
-st.markdown("카테고리, 평점, 지도 스타일을 선택해 다양한 음식점을 탐색해보세요!")
+st.title("🍴 서울 음식점 탐색 지도")
+st.markdown("현재 위치 근처 음식점을 평점, 카테고리, 지도 스타일로 탐색해보세요!")
 
 # -----------------------------
-# 샘플 데이터 생성
+# 샘플 음식점 데이터
 # -----------------------------
 data = {
     "이름": ["한남돈까스", "을지로냉면", "홍대버거", "강남스시", "성수카페", "망원분식", "종로우동", "잠실피자", "건대치킨", "이태원파스타"],
@@ -28,56 +29,84 @@ data = {
 df = pd.DataFrame(data)
 
 # -----------------------------
-# 필터 UI
+# 필터 및 사용자 위치 입력
 # -----------------------------
-col1, col2, col3 = st.columns(3)
+st.sidebar.header("🔍 탐색 옵션")
 
-with col1:
-    category = st.selectbox("🍱 카테고리 선택", ["전체"] + sorted(df["카테고리"].unique().tolist()))
+category = st.sidebar.selectbox("🍱 카테고리 선택", ["전체"] + sorted(df["카테고리"].unique().tolist()))
+rating_min = st.sidebar.slider("⭐ 최소 평점", 0.0, 5.0, 4.0, 0.1)
+map_style = st.sidebar.selectbox("🗺️ 지도 스타일", [
+    "open-street-map", "carto-positron", "stamen-terrain", "stamen-toner", "carto-darkmatter"
+])
 
-with col2:
-    rating = st.slider("⭐ 최소 평점", 0.0, 5.0, 4.0, 0.1)
+st.sidebar.markdown("---")
+st.sidebar.subheader("📍 현재 위치 설정 (서울 기준)")
+lat_user = st.sidebar.slider("위도 (37.45~37.60)", 37.45, 37.60, 37.55, 0.001)
+lon_user = st.sidebar.slider("경도 (126.90~127.10)", 126.90, 127.10, 127.00, 0.001)
+radius = st.sidebar.slider("📏 반경 (km)", 1, 10, 3)
 
-with col3:
-    map_style = st.selectbox("🗺️ 지도 스타일", [
-        "open-street-map", "carto-positron", "stamen-terrain", "stamen-toner", "carto-darkmatter"
-    ])
+# -----------------------------
+# 거리 계산 (Haversine 공식)
+# -----------------------------
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371  # km 단위 지구 반지름
+    phi1, phi2 = np.radians(lat1), np.radians(lat2)
+    dphi = np.radians(lat2 - lat1)
+    dlambda = np.radians(lon2 - lon1)
+    a = np.sin(dphi/2)**2 + np.cos(phi1)*np.cos(phi2)*np.sin(dlambda/2)**2
+    return 2 * R * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+
+df["거리(km)"] = df.apply(lambda row: haversine(lat_user, lon_user, row["위도"], row["경도"]), axis=1)
 
 # -----------------------------
 # 데이터 필터링
 # -----------------------------
-filtered_df = df.copy()
+filtered = df[df["평점"] >= rating_min]
 if category != "전체":
-    filtered_df = filtered_df[filtered_df["카테고리"] == category]
-filtered_df = filtered_df[filtered_df["평점"] >= rating]
+    filtered = filtered[filtered["카테고리"] == category]
+filtered = filtered[filtered["거리(km)"] <= radius]
 
 # -----------------------------
 # 지도 시각화
 # -----------------------------
-fig_map = px.scatter_mapbox(
-    filtered_df,
-    lat="위도",
-    lon="경도",
-    color="평점",
-    size="평점",
-    color_continuous_scale="RdYlGn",
-    size_max=15,
-    hover_name="이름",
-    hover_data=["주소", "카테고리", "평점"],
-    zoom=11,
-    height=600
-)
+st.subheader("🗺️ 지도 보기")
 
-fig_map.update_layout(
-    mapbox_style=map_style,
-    mapbox_center={"lat": 37.55, "lon": 127.0},  # 서울 중심
-    margin={"r":0, "t":0, "l":0, "b":0}
-)
+if filtered.empty:
+    st.warning("해당 조건에 맞는 음식점이 없습니다.")
+else:
+    fig = px.scatter_mapbox(
+        filtered,
+        lat="위도",
+        lon="경도",
+        color="평점",
+        size="평점",
+        color_continuous_scale="RdYlGn",
+        size_max=20,
+        zoom=12,
+        hover_name="이름",
+        hover_data=["주소", "카테고리", "평점", "거리(km)"],
+        height=650
+    )
 
-st.plotly_chart(fig_map, use_container_width=True)
+    fig.add_scattermapbox(
+        lat=[lat_user],
+        lon=[lon_user],
+        mode="markers+text",
+        marker=dict(size=15, color="blue"),
+        text=["📍 현재 위치"],
+        textposition="top right"
+    )
+
+    fig.update_layout(
+        mapbox_style=map_style,
+        mapbox_center={"lat": lat_user, "lon": lon_user},
+        margin={"r":0, "t":0, "l":0, "b":0}
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
 
 # -----------------------------
-# 카테고리별 평균 평점 바 차트
+# 카테고리별 평균 평점
 # -----------------------------
 st.subheader("📊 카테고리별 평균 평점")
 avg_ratings = df.groupby("카테고리")["평점"].mean().reset_index()
