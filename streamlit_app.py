@@ -36,4 +36,47 @@ col1, col2 = st.columns([1.1, 2])
 with col1:
     st.subheader("📋 음식점 목록")
     st.dataframe(
-        fi
+        filtered[["name", "category", "price_range", "location", "rating"]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.subheader("⭐ 음식 종류별 평균 평점")
+    avg_rating = filtered.groupby("category")["rating"].mean().sort_values(ascending=True)
+    fig_bar = px.bar(
+        avg_rating,
+        x=avg_rating.values,
+        y=avg_rating.index,
+        orientation="h",
+        color=avg_rating.values,
+        color_continuous_scale="sunset",
+        labels={"x": "평균 평점", "y": "음식 종류"},
+        title="음식 종류별 평균 평점 비교",
+    )
+    fig_bar.update_layout(showlegend=False, height=500)
+    st.plotly_chart(fig_bar, use_container_width=True)
+
+with col2:
+    st.subheader("🗺️ 음식점 위치 지도")
+    # 지도 시각화
+    try:
+        fig_map = px.scatter_mapbox(
+            filtered,
+            lat="lat",
+            lon="lon",
+            color="category",
+            size="rating",
+            hover_name="name",
+            hover_data={"location": True, "rating": True, "price_range": True, "lat": False, "lon": False},
+            color_discrete_sequence=px.colors.qualitative.Pastel,
+            zoom=6,
+            height=650,
+            title="지역별 음식점 분포",
+        )
+        fig_map.update_layout(mapbox_style="open-street-map", margin={"r":0, "t":40, "l":0, "b":0})
+        st.plotly_chart(fig_map, use_container_width=True)
+    except ValueError:
+        st.error("지도를 표시하는 중 오류가 발생했습니다. lat/lon 데이터가 올바른지 확인해주세요.")
+
+st.markdown("---")
+st.markdown("📊 **총 음식점 수:** {}개 | ⭐ **평균 평점:** {:.2f}".format(len(filtered), filtered["rating"].mean()))
