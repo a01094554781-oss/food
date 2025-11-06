@@ -67,10 +67,19 @@ filtered = df[
     (df["category"].isin(categories))
 ]
 
-# --- 레이아웃: 2열 구성 ---
+# --- 상단 요약 ---
+st.markdown("### 📊 요약 통계")
+col_a, col_b, col_c = st.columns(3)
+col_a.metric("총 음식점 수", f"{len(filtered)}개")
+col_b.metric("평균 평점", f"{filtered['rating'].mean():.2f}")
+col_c.metric("최고 평점", f"{filtered['rating'].max():.1f}")
+
+st.divider()
+
+# --- 상단 2열: 표 + 지도 ---
 col1, col2 = st.columns([1.1, 2])
 
-# --- 왼쪽: 표 + 바 그래프 ---
+# 표 + 음식 종류별 평균 평점
 with col1:
     st.subheader("📋 음식점 목록")
     st.dataframe(
@@ -94,7 +103,7 @@ with col1:
     fig_bar.update_layout(showlegend=False, height=500)
     st.plotly_chart(fig_bar, use_container_width=True)
 
-# --- 오른쪽: 지도 ---
+# 지도
 with col2:
     st.subheader("🗺️ 음식점 위치 지도")
     fig_map = px.scatter_mapbox(
@@ -119,8 +128,40 @@ with col2:
     fig_map.update_layout(mapbox_style="open-street-map", margin={"r":0, "t":40, "l":0, "b":0})
     st.plotly_chart(fig_map, use_container_width=True)
 
-# --- 하단 요약 ---
-st.markdown("---")
-st.markdown(
-    f"📊 **총 음식점 수:** {len(filtered)}개 | ⭐ **평균 평점:** {filtered['rating'].mean():.2f}"
-)
+st.divider()
+
+# --- 하단 2열: 추가 시각화 ---
+col3, col4 = st.columns(2)
+
+# 가격대별 비율 파이차트
+with col3:
+    st.subheader("💰 가격대별 비율")
+    price_counts = filtered["price_range"].value_counts()
+    fig_pie = px.pie(
+        values=price_counts.values,
+        names=price_counts.index,
+        color_discrete_sequence=px.colors.sequential.RdPu,
+        hole=0.4,
+        title="가격대별 음식점 분포"
+    )
+    fig_pie.update_traces(textinfo="percent+label")
+    st.plotly_chart(fig_pie, use_container_width=True)
+
+# 도시별 평균 평점 비교
+with col4:
+    st.subheader("🏙️ 도시별 평균 평점 비교")
+    city_rating = filtered.groupby("location")["rating"].mean().sort_values(ascending=False)
+    fig_city = px.bar(
+        city_rating,
+        x=city_rating.index,
+        y=city_rating.values,
+        color=city_rating.values,
+        color_continuous_scale="Agsunset",
+        labels={"x": "도시", "y": "평균 평점"},
+        title="도시별 평균 평점 비교",
+    )
+    fig_city.update_layout(showlegend=False, height=400)
+    st.plotly_chart(fig_city, use_container_width=True)
+
+st.divider()
+st.markdown("📍 *데이터는 예시용이며 실제 음식점 정보와 다를 수 있습니다.*")
