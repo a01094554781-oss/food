@@ -2,13 +2,14 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
+from datetime import datetime
 
 # -----------------------------
 # 🌐 기본 설정
 # -----------------------------
 st.set_page_config(page_title="서울 음식점 탐색 지도", layout="wide")
 st.title("🍴 서울 음식점 탐색 지도")
-st.markdown("서울 전역의 음식점을 평점, 시간대별 혼잡도, 거리, 지도 스타일 등으로 탐색해보세요!")
+st.markdown("서울 전역의 음식점을 평점, 시간대 혼잡도, 거리, 지도 스타일 등으로 탐색해보세요!")
 
 # -----------------------------
 # 📍 가상 데이터 생성 함수
@@ -24,22 +25,15 @@ def generate_data(n=3000):
     name_prefix = ["맛집", "고향", "명가", "리미티드", "스페셜", "정통", "하우스", "오리지널", "서울", "트렌디", "핫플", "로컬"]
     name_suffix = ["한식당", "식당", "다이닝", "레스토랑", "카페", "그릴", "키친", "라운지", "하우스", "포차", "펍"]
     names = [f"{np.random.choice(name_prefix)} {np.random.choice(name_suffix)}" for _ in range(n)]
-    ratings = np.round(np.random.uniform(2.0, 5.0, n), 1)
-    
-    # 각 시간대별 혼잡도 (0~1 사이 비율)
-    morning = np.round(np.random.uniform(0.2, 0.8, n), 2)
-    lunch = np.round(np.random.uniform(0.3, 1.0, n), 2)
-    evening = np.round(np.random.uniform(0.4, 1.0, n), 2)
-    
+    ratings = np.round(np.random.uniform(2.0, 5.0, n), 1)  # 낮은 평점도 포함
+    congestion = np.random.choice(["한산", "보통", "붐빔"], n, p=[0.3, 0.4, 0.3])
     return pd.DataFrame({
         "이름": names,
         "카테고리": categories,
         "위도": latitudes,
         "경도": longitudes,
         "평점": ratings,
-        "혼잡도(오전)": morning,
-        "혼잡도(점심)": lunch,
-        "혼잡도(저녁)": evening
+        "혼잡도": congestion
     })
 
 # -----------------------------
@@ -48,6 +42,19 @@ def generate_data(n=3000):
 if "restaurants" not in st.session_state:
     st.session_state["restaurants"] = generate_data(3000)
 df = st.session_state["restaurants"]
+
+# -----------------------------
+# 🕒 시간대별 혼잡도 가중치 적용
+# -----------------------------
+current_hour = datetime.now().hour
+def time_congestion_modifier(hour):
+    if 11 <= hour <= 13 or 18 <= hour <= 20:  # 점심/저녁 시간대
+        return {"한산": 0.8, "보통": 1.0, "붐빔": 1.2}
+    else:
+        return {"한산": 1.0, "보통": 0.9, "붐빔": 0.8}
+
+mod = time_congestion_modifier(current_hour)
+df["혼잡도_지수"] = df["혼잡도"].map(mod)
 
 # -----------------------------
 # ⚙️ 사이드바 옵션
@@ -59,10 +66,6 @@ rating_min = st.sidebar.slider("⭐ 최소 평점", 0.0, 5.0, 3.0, 0.1)
 map_style = st.sidebar.selectbox("🗺️ 지도 스타일", [
     "open-street-map", "carto-positron", "stamen-terrain", "stamen-toner", "carto-darkmatter"
 ])
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("🕒 시간대 선택")
-time_slot = st.sidebar.radio("현재 시간대", ["오전", "점심", "저녁"], horizontal=True)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("📍 현재 위치 설정 (서울 기준)")
@@ -92,16 +95,9 @@ if category != "전체":
 filtered = filtered[filtered["거리(km)"] <= radius]
 
 # -----------------------------
-# ⏰ 혼잡도 컬럼 선택
-# -----------------------------
-congestion_col = f"혼잡도({time_slot})"
-filtered = filtered.copy()
-filtered["혼잡도"] = filtered[congestion_col]
-
-# -----------------------------
 # 🗺️ 지도 시각화
 # -----------------------------
-st.subheader(f"🗺️ 음식점 지도 보기 ({time_slot} 기준 혼잡도)")
+st.subheader("🗺️ 음식점 지도 보기")
 
 if filtered.empty:
     st.warning("조건에 맞는 음식점이 없습니다.")
@@ -111,16 +107,15 @@ else:
         lat="위도",
         lon="경도",
         color="평점",
-        size="혼잡도",
+        size="혼잡도_지수",
         color_continuous_scale="RdYlGn",
-        size_max=25,
+        size_max=20,
         zoom=11,
         hover_name="이름",
         hover_data=["카테고리", "평점", "혼잡도", "거리(km)"],
         height=700
     )
 
-    # 현재 위치 표시
     fig.add_scattermapbox(
         lat=[lat_user],
         lon=[lon_user],
@@ -134,7 +129,7 @@ else:
         mapbox_style=map_style,
         mapbox_center={"lat": lat_user, "lon": lon_user},
         margin={"r":0, "t":0, "l":0, "b":0},
-        dragmode="zoom"
+        dragmode="zoom"  # 마우스로 확대/이동 가능
     )
 
     st.plotly_chart(fig, use_container_width=True)
@@ -154,9 +149,7 @@ with st.form("add_restaurant_form"):
     with col2:
         lat = st.number_input("위도", min_value=37.45, max_value=37.70, value=37.55, step=0.0001)
         lon = st.number_input("경도", min_value=126.80, max_value=127.10, value=127.00, step=0.0001)
-        congestion_m = st.slider("오전 혼잡도", 0.0, 1.0, 0.5, 0.1)
-        congestion_l = st.slider("점심 혼잡도", 0.0, 1.0, 0.7, 0.1)
-        congestion_e = st.slider("저녁 혼잡도", 0.0, 1.0, 0.8, 0.1)
+        congestion_new = st.selectbox("혼잡도", ["한산", "보통", "붐빔"])
     submitted = st.form_submit_button("추가하기")
 
     if submitted:
@@ -166,16 +159,15 @@ with st.form("add_restaurant_form"):
             "위도": lat,
             "경도": lon,
             "평점": rating,
-            "혼잡도(오전)": congestion_m,
-            "혼잡도(점심)": congestion_l,
-            "혼잡도(저녁)": congestion_e,
+            "혼잡도": congestion_new,
+            "혼잡도_지수": mod[congestion_new],
             "거리(km)": haversine(lat_user, lon_user, lat, lon)
         }])
         st.session_state["restaurants"] = pd.concat([df, new_row], ignore_index=True)
         st.success(f"✅ '{name}' 음식점이 추가되었습니다! (지도 새로고침 시 반영)")
 
 # -----------------------------
-# 📊 요약 시각화
+# 📊 카테고리별 평균 평점 & 혼잡도 시각화
 # -----------------------------
 st.markdown("---")
 col_a, col_b = st.columns(2)
@@ -185,10 +177,6 @@ with col_a:
     st.bar_chart(avg_ratings.set_index("카테고리"))
 
 with col_b:
-    st.subheader("👥 시간대별 평균 혼잡도")
-    avg_congestion = {
-        "오전": df["혼잡도(오전)"].mean(),
-        "점심": df["혼잡도(점심)"].mean(),
-        "저녁": df["혼잡도(저녁)"].mean()
-    }
-    st.bar_chart(pd.Series(avg_congestion))
+    st.subheader("👥 혼잡도 비율")
+    congestion_counts = df["혼잡도"].value_counts()
+    st.bar_chart(congestion_counts)
